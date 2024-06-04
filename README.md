@@ -5,6 +5,9 @@ pip install langchain
 pip install chainlit
 pip install langchain-community
 pip install pdfplumber
+pip install chromadb
+pip install pysqlite3
+pip install sentence-transformers
 ```
 
 2. Run LM Studio.

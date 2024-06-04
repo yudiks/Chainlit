@@ -1,22 +1,29 @@
-# import chainlit as cl
+# # Chroma compatibility issue resolution
+# # https://docs.trychroma.com/troubleshooting#sqlite
+# __import__("pysqlite3")
+# import sys
+
+# sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+
+import chainlit as cl
 from chainlit.types import ThreadDict
-
-# from langchain.chat_models import ChatOpenAI
-# from langchain.prompts import ChatPromptTemplate
-# from langchain.schema import StrOutputParser
-# from langchain.chains import LLMChain
-
 from tempfile import NamedTemporaryFile
 from typing import List
-import chainlit as cl
 from chainlit.types import AskFileResponse
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document, StrOutputParser
 from langchain.chains import LLMChain
-
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.document_loaders import PDFPlumberLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema.embeddings import Embeddings
+from langchain_community.vectorstores import Chroma
+from langchain.vectorstores.base import VectorStore
+import chromadb
+from chromadb.config import Settings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 
 def process_file(*, file: AskFileResponse) -> List[Document]:
     """Processes one PDF file from a Chainlit AskFileResponse object by first
@@ -113,6 +120,35 @@ async def on_chat_start():
     msg.content = f"`{file.name}` processed. Loading ..."
     await msg.update()
 
+
+    # Indexing documents into our search engine
+    ##########################################################################
+    # Exercise 2:
+    # Add OpenAI's embedding model as the encoder. The most standard one to
+    # use is text-embedding-ada-002.
+    # NOTE: https://python.langchain.com/docs/integrations/text_embedding/openai
+    ##########################################################################
+    # embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
+    # embeddings = OpenAIEmbeddings(
+    #     base_url="http://localhost:1234/v1/",
+    #     api_key="lm-studio",
+    # )
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
+    ##########################################################################
+
+    try:
+        search_engine = await cl.make_async(create_search_engine)(
+            docs=docs, embeddings=embeddings
+        )
+    except Exception as e:
+        await cl.Message(content=f"Error: {e}").send()
+        raise SystemError
+    msg.content = f"`{file.name}` loaded. You can now ask questions!"
+    await msg.update()
+
+
+
     model =  ChatOpenAI(
         base_url="http://localhost:1234/v1",
         api_key="lm-studio",
@@ -134,6 +170,47 @@ async def on_chat_start():
     # We are saving the chain in user_session, so we do not have to rebuild
     # it every single time.
     cl.user_session.set("chain", chain)
+
+
+
+def create_search_engine(
+    *, docs: List[Document], embeddings: Embeddings
+) -> VectorStore:
+    """Takes a list of Langchain Documents and an embedding model API wrapper
+    and build a search index using a VectorStore.
+
+    Args:
+        docs (List[Document]): List of Langchain Documents to be indexed into
+        the search engine.
+        embeddings (Embeddings): encoder model API used to calculate embedding
+
+    Returns:
+        VectorStore: Langchain VectorStore
+    """
+    # Initialize Chromadb client to enable resetting and disable telemtry
+    client = chromadb.EphemeralClient()
+    client_settings = Settings(allow_reset=True, anonymized_telemetry=False)
+
+    # Reset the search engine to ensure we don't use old copies.
+    # NOTE: we do not need this for production
+    search_engine = Chroma(client=client, client_settings=client_settings)
+    # search_engine._client.reset()
+    ##########################################################################
+    # Exercise 1:
+    # Now we have defined our encoder model and initialized our search engine
+    # client, please create the search engine from documents
+    # NOTE: https://python.langchain.com/docs/integrations/vectorstores/chroma
+    ##########################################################################
+    search_engine = Chroma.from_documents(
+        client=client,
+        documents=docs,
+        embedding=embeddings,
+        client_settings=client_settings,
+    )
+    ##########################################################################
+
+    return search_engine
+
 
 
 @cl.on_message
