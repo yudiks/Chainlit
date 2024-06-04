@@ -4,6 +4,7 @@
 pip install langchain
 pip install chainlit
 pip install langchain-community
+pip install pdfplumber
 ```
 
 2. Run LM Studio.
